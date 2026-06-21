@@ -1,1 +1,28 @@
-
+{
+  "search_config": {
+    "max_price_aud": 10000,
+    "radius_km": 150,
+    "base_postcode": 3224,
+    "targets": [
+      {"make": "Toyota", "models": ["Landcruiser", "Land Cruiser Prado", "Hilux"], "series": ["90", "100", "105", "200"]},
+      {"make": "Nissan", "models": ["Patrol"], "series": ["GU", "Y61"]},
+      {"make": "Lexus", "models": ["LX470", "LX450", "RX330", "RX350", "RX400h"]},
+      {"make": "Isuzu", "models": ["D-Max", "Dmax"]}
+    ]
+  },
+  "filters": {
+    "hard_discards": [
+      "wrecking", "parting out", "parts only", "head gasket", 
+      "blown", "engine knock", "wovr", "written off", 
+      "statutory write-off", "repairable write-off", "project car"
+    ],
+    "leverage_points": [
+      "oil leak", "engine oil leak", "rocker cover leak", "no rwc", 
+      "no rego", "brakes", "suspension", "rough", "runs rough"
+    ]
+  },
+  "delivery": {
+    "email_recipient": "your.email@example.com",
+    "mobile_number": "+61400000000"
+  }
+}
