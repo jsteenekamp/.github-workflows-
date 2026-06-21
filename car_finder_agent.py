@@ -38,21 +38,39 @@ def scrape_gumtree(page, make, model):
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(2000) # Quick settling time
         
-        # Human-like scroll to trigger lazy loading of data
-        page.mouse.wheel(0, 800)
-        page.wait_for_timeout(1000)
-        
-        # Locate item card elements on the page
-        cards = page.locator("a.user-ad-row-new-design").all()
+        # Locate item card elements using a generic URL pattern instead of volatile class names
+        # Gumtree ads always contain '/s-ad/' in their hyperlinks
+        cards = page.locator("a[href*='/s-ad/']").all()
         
         for card in cards:
             try:
-                title = card.locator("span.user-ad-row-new-design__title").text_content() or ""
-                price_text = card.locator("span.user-ad-row-new-design__price").text_content() or "0"
-                location = card.locator("span.user-ad-row-new-design__location").text_content() or ""
+                # Target elements safely using relaxed, partial text matches or relative structural positions
+                title = card.locator("p, span, h3").first.text_content() or ""
+                price_text = card.text_content() or "0"
                 ad_url = card.get_attribute("href") or ""
+                
                 if ad_url and not ad_url.startswith("http"):
                     ad_url = "https://www.gumtree.com.au" + ad_url
+                
+                # Skip duplicate tracking elements or empty blocks
+                if not title.strip() or "$" not in price_text:
+                    continue
+                
+                # Clean the price string to an integer
+                price = int(''.join(filter(str.isdigit, price_text))) if any(char.isdigit() for char in price_text) else 0
+                
+                listings.append({
+                    "make": make,
+                    "model": model,
+                    "year": "N/A",
+                    "price": price,
+                    "area": "Victoria (150km Radius)",
+                    "url": ad_url,
+                    "title": title.strip(),
+                    "desc": "Check live listing for description details."
+                })
+            except Exception:
+                continue
                 
                 # Clean the price string to an integer
                 price = int(''.join(filter(str.isdigit, price_text))) if any(char.isdigit() for char in price_text) else 0
