@@ -10,88 +10,78 @@ with open("config.json", "r") as f:
     CONFIG = json.load(f)
 
 def evaluate_mechanical_condition(title, description):
-    """Applies professional mechanical filters against listing texts."""
     full_text = f"{title} {description}".lower()
-    
     for discard in CONFIG["filters"]["hard_discards"]:
         if discard in full_text:
             return "DISCARD"
-            
     for leverage in CONFIG["filters"]["leverage_points"]:
         if leverage in full_text:
             return "HIGHLIGHT"
-            
     return "KEEP"
 
 def scrape_gumtree(page, make, model):
-    """Connects to Gumtree and extracts live local listings within our radius."""
-    # Build search query (e.g., "Toyota Hilux")
     search_query = f"{make} {model}"
     encoded_query = urllib.parse.quote(search_query)
-    
-    # Target URL utilizing the 150km radius and max price constraints
-    # Leopold postcode 3224 sits within the broader Victoria regional boundaries
     url = f"https://www.gumtree.com.au/s-cars-vehicles/victoria/{encoded_query}/k0c18320l3008842?price=__10000.00&radius=150"
     
     listings = []
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(2000) # Quick settling time
+        print(f"[DEBUG] Navigating to: {url}")
+        response = page.goto(url, wait_until="load", timeout=45000)
+        print(f"[DEBUG] HTTP Response Status: {response.status if response else 'No Response'}")
         
-        # Locate item card elements using a generic URL pattern instead of volatile class names
-        # Gumtree ads always contain '/s-ad/' in their hyperlinks
+        page.wait_for_timeout(3000)
+        
+        # Check if we got hit by a security wall
+        page_title = page.title()
+        print(f"[DEBUG] Page Title loaded: '{page_title}'")
+        if "Access Denied" in page_title or "Cloudflare" in page_title or "Just a moment" in page_title:
+            print("[WARNING] Anti-bot wall detected. Attempting behavior masking patterns...")
+            page.mouse.move(200, 200)
+            page.keyboard.press("PageDown")
+            page.wait_for_timeout(4000)
+
+        # Diagnostics: Total links found on page
+        all_links = page.locator("a").all()
+        print(f"[DEBUG] Total links found on page: {len(all_links)}")
+
+        # Find any listing URLs containing '/s-ad/'
         cards = page.locator("a[href*='/s-ad/']").all()
+        print(f"[DEBUG] Found {len(cards)} matching listing links.")
         
-        for card in cards:
+        for index, card in enumerate(cards[:15]): # Inspect first 15 links
             try:
-                # Target elements safely using relaxed, partial text matches or relative structural positions
-                title = card.locator("p, span, h3").first.text_content() or ""
-                price_text = card.text_content() or "0"
-                ad_url = card.get_attribute("href") or ""
+                href = card.get_attribute("href") or ""
+                text = card.text_content() or ""
+                cleaned_text = " ".join(text.split())
                 
-                if ad_url and not ad_url.startswith("http"):
-                    ad_url = "https://www.gumtree.com.au" + ad_url
-                
-                # Skip duplicate tracking elements or empty blocks
-                if not title.strip() or "$" not in price_text:
-                    continue
-                
-                # Clean the price string to an integer
-                price = int(''.join(filter(str.isdigit, price_text))) if any(char.isdigit() for char in price_text) else 0
-                
-                listings.append({
-                    "make": make,
-                    "model": model,
-                    "year": "N/A",
-                    "price": price,
-                    "area": "Victoria (150km Radius)",
-                    "url": ad_url,
-                    "title": title.strip(),
-                    "desc": "Check live listing for description details."
-                })
-            except Exception:
+                if "$" in cleaned_text:
+                    print(f"   -> Link {index}: Found price indicator in text: '{cleaned_text[:60]}...'")
+                    
+                    # Extract numeric price
+                    price = 0
+                    price_words = cleaned_text.split("$")
+                    if len(price_words) > 1:
+                        digits = "".join(filter(str.isdigit, price_words[1].split()[0]))
+                        if digits:
+                            price = int(digits)
+
+                    listings.append({
+                        "make": make,
+                        "model": model,
+                        "year": "N/A",
+                        "price": price,
+                        "area": "Victoria (150km Radius)",
+                        "url": "https://www.gumtree.com.au" + href if not href.startswith("http") else href,
+                        "title": cleaned_text[:50],
+                        "desc": cleaned_text
+                    })
+            except Exception as e:
+                print(f"[DEBUG] Card parsing error at index {index}: {e}")
                 continue
                 
-                # Clean the price string to an integer
-                price = int(''.join(filter(str.isdigit, price_text))) if any(char.isdigit() for char in price_text) else 0
-                
-                # Snag a snippet description if available on the card layout
-                desc = card.locator("p.user-ad-row-new-design__description").text_content() or ""
-                
-                listings.append({
-                    "make": make,
-                    "model": model,
-                    "year": "N/A", # Will parse out from text or direct detail pages later
-                    "price": price,
-                    "area": location.strip(),
-                    "url": ad_url,
-                    "title": title.strip(),
-                    "desc": desc.strip()
-                })
-            except Exception:
-                continue # Skip any weirdly formatted ad cards or banners
     except Exception as e:
-        print(f"[ERROR] Failed scraping Gumtree for {search_query}: {e}")
+        print(f"[ERROR] Engine failure for {search_query}: {e}")
         
     return listings
 
@@ -102,30 +92,29 @@ def process_and_save_listings():
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # Emulating a real browser footprint to avoid instant blocking
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800}
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport={"width": 1440, "height": 900},
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            }
         )
         page = context.new_page()
         
-        # Loop over every vehicle target listed in your config file
         for target in CONFIG["search_config"]["targets"]:
             make = target["make"]
             for model in target["models"]:
-                print(f"[INFO] Hunting live listings for {make} {model}...")
+                print(f"\n[INFO] Starting live scan: {make} {model}")
                 raw_listings = scrape_gumtree(page, make, model)
                 
                 for item in raw_listings:
                     status = evaluate_mechanical_condition(item["title"], item["desc"])
-                    
-                    if status == "DISCARD":
-                        continue
-                        
-                    item["agent_evaluation"] = status
-                    compiled_matches.append(item)
+                    if status != "DISCARD":
+                        item["agent_evaluation"] = status
+                        compiled_matches.append(item)
                 
-                page.wait_for_timeout(2000) # Graceful delay between target categories
+                page.wait_for_timeout(3000)
                 
         browser.close()
 
@@ -136,15 +125,9 @@ def process_and_save_listings():
             writer.writeheader()
             for match in compiled_matches:
                 writer.writerow(match)
-                
-        print(f"[SUCCESS] {len(compiled_matches)} safe vehicles extracted to {filename}")
-        dispatch_alerts(filename, len(compiled_matches))
+        print(f"\n[SUCCESS] Extracted {len(compiled_matches)} vehicles into {filename}")
     else:
-        print("[INFO] Run finished. Zero live vehicles matched parameters or passed filters today.")
-
-def dispatch_alerts(csv_filename, count):
-    print(f"[NOTIFICATION] Found {count} viable listings. Stored in {csv_filename}")
-    # Communication API endpoints connect here
+        print("\n[INFO] Complete. No items saved to CSV on this cycle.")
 
 if __name__ == "__main__":
     process_and_save_listings()
